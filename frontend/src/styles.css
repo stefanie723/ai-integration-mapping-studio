@@ -1,0 +1,30 @@
+:root {
+  --bg: #f0f3f7;
+  --panel: #ffffff;
+  --border: #e4e7ed;
+  --text: #1f2a37;
+  --muted: #6b7280;
+  --accent: #1a6fb5;
+  --accent-soft: #e8f2fa;
+  --success: #0f7b4c;
+  --warn: #b86e00;
+  --danger: #c0392b;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+}
+
+button {
+  font-family: inherit;
+}
