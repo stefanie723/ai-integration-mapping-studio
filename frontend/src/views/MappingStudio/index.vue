@@ -97,10 +97,12 @@
           clearable
           placeholder="搜索目标字段 / 中文名称"
           class="mapping-search"
+          @clear="currentPage = 1"
+          @input="currentPage = 1"
         />
 
         <el-table
-          :data="visibleMappings"
+          :data="pagedMappings"
           height="100%"
           border
           size="small"
@@ -118,7 +120,9 @@
           </el-table-column>
           <el-table-column label="赋值方式" width="120">
             <template #default="{ row }">
+              <span v-if="isCompactRow(row)" class="muted">{{ mappingTypeLabel(row.mappingType) }}</span>
               <el-select
+                v-else
                 v-model="row.mappingType"
                 size="small"
                 :disabled="isSystemFieldLocked(row)"
@@ -134,7 +138,8 @@
           </el-table-column>
           <el-table-column label="来源 / 配置值" min-width="200">
             <template #default="{ row }">
-              <div class="config-cell">
+              <span v-if="isCompactRow(row)" class="muted">{{ compactConfigText(row) }}</span>
+              <div v-else class="config-cell">
                 <el-select
                   v-if="row.mappingType === 'DIRECT' || row.mappingType === 'DEFAULT' || row.mappingType === 'DICTIONARY'"
                   v-model="row.sourceField"
@@ -240,6 +245,17 @@
           </el-table-column>
         </el-table>
 
+        <div v-if="filteredMappings.length > pageSize" class="pager">
+          <el-pagination
+            v-model:current-page="currentPage"
+            :page-size="pageSize"
+            :total="filteredMappings.length"
+            layout="total, prev, pager, next"
+            small
+            background
+          />
+        </div>
+
         <div v-if="activeView === 'pending' && summary.pendingFields === 0 && mappings.length" class="done-banner">
           ✓ 当前 Mapping 已无待处理字段
         </div>
@@ -272,7 +288,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import SchemaTreePanel from '../../components/SchemaTreePanel.vue'
 import { api } from '../../api'
@@ -281,6 +297,7 @@ import type {
   FieldMapping,
   GeneratedFile,
   MappingSummary,
+  MappingType,
   MappingView,
   Scenario,
   SchemaField,
@@ -291,6 +308,7 @@ import {
   countByView,
   filterMappings,
   recomputeStatuses,
+  resolveStatus,
   showConfidence,
   statusLabel,
   statusTagType
@@ -322,6 +340,12 @@ const highlightSourceField = ref<string | null>(null)
 const focusTargetField = ref<string | null>(null)
 /** Target fields the user explicitly chose to override (SYSTEM_FIELD unlock) */
 const manuallyEditingSystemFields = ref<Set<string>>(new Set())
+const pageSize = 40
+const currentPage = ref(1)
+
+watch(activeView, () => {
+  currentPage.value = 1
+})
 
 const loadingRecommend = ref(false)
 const loadingSave = ref(false)
@@ -344,9 +368,15 @@ const viewTabs: { key: MappingView; label: string }[] = [
 
 const sourcePaths = computed(() => flattenPaths(sourceSchema.value?.fields || []))
 const viewCounts = computed(() => countByView(mappings.value))
-const visibleMappings = computed(() =>
+const filteredMappings = computed(() =>
   filterMappings(mappings.value, activeView.value, mappingKeyword.value)
 )
+const pagedMappings = computed(() => {
+  const list = filteredMappings.value
+  if (list.length <= pageSize) return list
+  const start = (currentPage.value - 1) * pageSize
+  return list.slice(start, start + pageSize)
+})
 
 function applyMappings(list: FieldMapping[], serverSummary?: MappingSummary) {
   mappings.value = recomputeStatuses(list)
@@ -354,11 +384,64 @@ function applyMappings(list: FieldMapping[], serverSummary?: MappingSummary) {
   activeView.value = 'pending'
   mappingKeyword.value = ''
   highlightSourceField.value = null
+  focusTargetField.value = null
+  currentPage.value = 1
 }
 
 function refreshLocalStatus() {
-  mappings.value = recomputeStatuses(mappings.value)
+  // Mutate in place — avoid replacing the whole 300+ array (cheaper for Vue).
+  for (const m of mappings.value) {
+    const status = resolveStatus(m)
+    m.status = status
+    m.needConfirm = status === 'NEED_CONFIRM' || status === 'AI_RECOMMENDED'
+  }
   summary.value = buildSummary(mappings.value)
+}
+
+function mappingTypeLabel(type: MappingType): string {
+  switch (type) {
+    case 'DIRECT':
+      return '直接映射'
+    case 'CONSTANT':
+      return '固定值'
+    case 'DEFAULT':
+      return '默认值'
+    case 'DICTIONARY':
+      return '字典转换'
+    case 'IGNORE':
+      return '忽略'
+    default:
+      return type
+  }
+}
+
+/** Lightweight cells for ignored/system rows — avoids mounting hundreds of el-select. */
+function isCompactRow(row: FieldMapping): boolean {
+  if (focusTargetField.value === row.targetField) return false
+  if (manuallyEditingSystemFields.value.has(row.targetField)) return false
+  return (
+    row.status === 'SYSTEM_FIELD' ||
+    row.status === 'IGNORED' ||
+    row.mappingType === 'IGNORE'
+  )
+}
+
+function compactConfigText(row: FieldMapping): string {
+  if (row.mappingType === 'IGNORE') return '-'
+  return row.sourceField || row.fixedValue || row.defaultValue || '-'
+}
+
+function focusMappingRow(targetField: string) {
+  mappingKeyword.value = ''
+  focusTargetField.value = targetField
+  activeView.value = 'all'
+  nextTick(() => {
+    const list = filterMappings(mappings.value, 'all', '')
+    const idx = list.findIndex((m) => m.targetField === targetField)
+    if (idx >= 0) {
+      currentPage.value = Math.floor(idx / pageSize) + 1
+    }
+  })
 }
 
 async function refreshKingdeeStatus() {
@@ -676,27 +759,22 @@ function onAddToMapping(field: SchemaField) {
       existing.mappingType = 'DIRECT'
       existing.confirmed = false
     }
-    focusTargetField.value = field.path
-    activeView.value = 'all'
-    mappingKeyword.value = field.code || field.path
     refreshLocalStatus()
+    focusMappingRow(field.path)
     ElMessage.success(`已定位到 ${field.path}`)
     return
   }
-  mappings.value = recomputeStatuses([
-    ...mappings.value,
-    {
-      targetField: field.path,
-      targetFieldName: field.name,
-      mappingType: 'DIRECT',
-      confirmed: false,
-      targetRequired: field.required
-    }
-  ])
+  const created: FieldMapping = {
+    targetField: field.path,
+    targetFieldName: field.name,
+    mappingType: 'DIRECT',
+    confirmed: false,
+    targetRequired: field.required
+  }
+  created.status = resolveStatus(created)
+  mappings.value.push(created)
   summary.value = buildSummary(mappings.value)
-  activeView.value = 'all'
-  mappingKeyword.value = field.code || field.path
-  focusTargetField.value = field.path
+  focusMappingRow(field.path)
   ElMessage.success(`已添加 ${field.path} 到 Mapping`)
 }
 
@@ -900,6 +978,12 @@ function removeDictRow(row: FieldMapping, idx: number) {
 
 .mapping-search {
   margin-bottom: 8px;
+}
+
+.pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 
 .config-cell {
