@@ -144,7 +144,11 @@ class MappingApplicationService(
         scenarioRepository.findByCode(dto.scenarioCode)
             ?: throw IllegalArgumentException("场景不存在: ${dto.scenarioCode}")
 
-        val forbiddenIgnore = dto.mappings.filter { it.targetRequired && it.mappingType == MappingType.IGNORE }
+        val forbiddenIgnore = dto.mappings.filter {
+            it.targetRequired &&
+                    it.mappingType == MappingType.IGNORE &&
+                    !systemFieldClassifier.isSystemField(it.targetField)
+        }
         if (forbiddenIgnore.isNotEmpty()) {
             throw IllegalArgumentException(
                 "必填字段不允许忽略: ${forbiddenIgnore.joinToString { it.targetField }}"
