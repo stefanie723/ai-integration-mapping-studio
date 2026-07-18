@@ -75,6 +75,19 @@ data class RequiredCheckResult(
     val missingRequiredFields: List<String>
 )
 
+data class ReconcileSchemaRequest(
+    val customerId: Long,
+    val targetFormId: String,
+    val refresh: Boolean = true,
+    val mappings: List<FieldMappingDto> = emptyList()
+)
+
+data class ReconcileSchemaResponse(
+    val targetSchema: com.aims.domain.schema.SchemaTree,
+    val mappings: List<FieldMappingDto>,
+    val summary: MappingSummary
+)
+
 data class CodeGenerationRequest(
     val mappingConfigurationId: Long,
     val language: String = "KOTLIN"

@@ -4,6 +4,8 @@ import type {
   Customer,
   GeneratedFile,
   MappingConfiguration,
+  ReconcileSchemaRequest,
+  ReconcileSchemaResponse,
   RecommendResponse,
   RequiredCheckResult,
   Scenario,
@@ -58,6 +60,12 @@ export const api = {
     unwrap(http.post<ApiResponse<MappingConfiguration>>('/mappings', config)),
   checkRequired: (config: MappingConfiguration) =>
     unwrap(http.post<ApiResponse<RequiredCheckResult>>('/mappings/check-required', config)),
+  reconcileSchema: (request: ReconcileSchemaRequest) =>
+    unwrap(
+      http.post<ApiResponse<ReconcileSchemaResponse>>('/mappings/reconcile-schema', request, {
+        timeout: 120000
+      })
+    ),
   generateCode: (mappingConfigurationId: number, language = 'KOTLIN') =>
     unwrap(
       http.post<ApiResponse<{ files: GeneratedFile[] }>>('/code-generation', {

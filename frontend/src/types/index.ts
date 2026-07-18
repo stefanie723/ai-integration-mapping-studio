@@ -104,6 +104,19 @@ export interface RequiredCheckResult {
   missingRequiredFields: string[]
 }
 
+export interface ReconcileSchemaRequest {
+  customerId: number
+  targetFormId: string
+  refresh?: boolean
+  mappings: FieldMapping[]
+}
+
+export interface ReconcileSchemaResponse {
+  targetSchema: SchemaTree
+  mappings: FieldMapping[]
+  summary: MappingSummary
+}
+
 export interface GeneratedFile {
   fileName: string
   content: string

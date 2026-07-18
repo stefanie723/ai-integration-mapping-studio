@@ -13,29 +13,25 @@ class MappingStatusResolver(
 ) {
 
     fun resolve(mapping: FieldMappingDto): MappingStatus {
-        val required = mapping.targetRequired
         val effective = isEffectiveMapping(mapping)
         val aiSuggestion = isAiSuggestion(mapping)
         val systemField = systemFieldClassifier.isSystemField(mapping.targetField)
+        val confidence = mapping.confidence ?: 0.0
 
         return when {
-            required && !effective -> MappingStatus.REQUIRED_UNMAPPED
-            aiSuggestion && !mapping.confirmed && (mapping.confidence ?: 0.0) < 0.9 ->
+            mapping.confirmed && effective -> MappingStatus.CONFIRMED
+            effective && !mapping.confirmed && aiSuggestion && confidence < 0.9 ->
                 MappingStatus.NEED_CONFIRM
+            effective && !mapping.confirmed && aiSuggestion -> MappingStatus.AI_RECOMMENDED
+            effective && !mapping.confirmed -> MappingStatus.UNMAPPED
+            !effective && systemField -> MappingStatus.SYSTEM_FIELD
+            mapping.targetRequired && !effective -> MappingStatus.REQUIRED_UNMAPPED
+            aiSuggestion && !mapping.confirmed && confidence < 0.9 -> MappingStatus.NEED_CONFIRM
             aiSuggestion && !mapping.confirmed -> MappingStatus.AI_RECOMMENDED
-            mapping.confirmed -> MappingStatus.CONFIRMED
-            systemField -> MappingStatus.SYSTEM_FIELD
             mapping.mappingType == MappingType.IGNORE -> MappingStatus.IGNORED
             else -> MappingStatus.UNMAPPED
         }
     }
-
-    fun withStatus(mapping: FieldMappingDto): FieldMappingDto =
-        mapping.copy(
-            status = resolve(mapping),
-            needConfirm = resolve(mapping) == MappingStatus.NEED_CONFIRM ||
-                resolve(mapping) == MappingStatus.AI_RECOMMENDED
-        )
 
     fun enrichAll(mappings: List<FieldMappingDto>): List<FieldMappingDto> =
         mappings.map { m ->
@@ -86,10 +82,6 @@ class MappingStatusResolver(
             }
         }
 
-        /**
-         * AI suggestion exists when confidence is present and type is not IGNORE,
-         * with at least one suggested value (source / constant / default).
-         */
         fun isAiSuggestion(mapping: FieldMappingDto): Boolean {
             if (mapping.confidence == null) return false
             if (mapping.mappingType == MappingType.IGNORE) return false

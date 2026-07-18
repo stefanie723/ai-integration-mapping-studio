@@ -32,8 +32,16 @@ class RuleBasedKingdeeSystemFieldClassifier : KingdeeSystemFieldClassifier {
 
     override fun isSystemField(targetField: String): Boolean {
         if (targetField.isBlank()) return false
-        val leaf = targetField.substringAfterLast('.').substringAfterLast(']').trimStart('.')
-        val code = leaf.ifBlank { targetField }
-        return code in systemCodes || targetField in systemCodes
+        return normalizePathSegments(targetField).any { it in systemCodes }
+    }
+
+    companion object {
+        /**
+         * FEntity[].FCreatorId.FNumber → [FEntity, FCreatorId, FNumber]
+         */
+        fun normalizePathSegments(path: String): List<String> =
+            path.split('.')
+                .map { it.replace("[]", "").trim() }
+                .filter { it.isNotEmpty() }
     }
 }

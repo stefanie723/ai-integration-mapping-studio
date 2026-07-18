@@ -1,6 +1,7 @@
 package com.aims.application
 
 import com.aims.application.dto.*
+import com.aims.application.mapping.MappingSchemaMerger
 import com.aims.application.mapping.MappingStatusResolver
 import com.aims.domain.mapping.FieldMapping
 import com.aims.domain.mapping.MappingConfiguration
@@ -11,6 +12,7 @@ import com.aims.domain.schema.SchemaTree
 import com.aims.infrastructure.ai.AiMappingProvider
 import com.aims.infrastructure.mcp.company.CompanyMcpClient
 import com.aims.infrastructure.mcp.kingdee.KingdeeMcpClient
+import com.aims.infrastructure.mcp.kingdee.KingdeeSystemFieldClassifier
 import com.aims.infrastructure.persistence.CustomerRepository
 import com.aims.infrastructure.persistence.IntegrationScenarioRepository
 import com.aims.infrastructure.persistence.MappingConfigurationRepository
@@ -30,6 +32,8 @@ class MappingApplicationService(
     private val kingdeeMcpClient: KingdeeMcpClient,
     private val aiMappingProvider: AiMappingProvider,
     private val mappingStatusResolver: MappingStatusResolver,
+    private val mappingSchemaMerger: MappingSchemaMerger,
+    private val systemFieldClassifier: KingdeeSystemFieldClassifier,
     private val objectMapper: ObjectMapper
 ) {
 
@@ -94,7 +98,7 @@ class MappingApplicationService(
             )
         }
 
-        val merged = mergeWithSchemaLeaves(rawMappings, targetSchema)
+        val merged = mappingSchemaMerger.mergeMappingsWithTargetSchema(rawMappings, targetSchema)
         val enriched = mappingStatusResolver.enrichAll(merged)
         val summary = mappingStatusResolver.summarize(enriched)
 
@@ -107,6 +111,23 @@ class MappingApplicationService(
             targetSchema = targetSchema,
             mappings = enriched,
             summary = summary
+        )
+    }
+
+    fun reconcileSchema(request: ReconcileSchemaRequest): ReconcileSchemaResponse {
+        customerRepository.findById(request.customerId)
+            .orElseThrow { IllegalArgumentException("客户不存在: ${request.customerId}") }
+        val targetSchema = kingdeeMcpClient.getFormSchema(
+            request.customerId,
+            request.targetFormId,
+            request.refresh
+        )
+        val merged = mappingSchemaMerger.mergeMappingsWithTargetSchema(request.mappings, targetSchema)
+        val enriched = mappingStatusResolver.enrichAll(merged)
+        return ReconcileSchemaResponse(
+            targetSchema = targetSchema,
+            mappings = enriched,
+            summary = mappingStatusResolver.summarize(enriched)
         )
     }
 
@@ -171,17 +192,25 @@ class MappingApplicationService(
 
     fun checkRequired(dto: MappingConfigurationDto): RequiredCheckResult {
         val targetSchema = kingdeeMcpClient.getFormSchema(dto.customerId, dto.targetFormId)
-        val requiredPaths = leafFields(targetSchema)
+        val byTarget = dto.mappings.associateBy { it.targetField }
+
+        val missing = mappingSchemaMerger.leafFields(targetSchema)
             .filter { it.required }
             .map { it.path }
-            .toSet()
+            .filter { path ->
+                val mapping = byTarget[path]
+                val effective = mapping != null && MappingStatusResolver.isEffectiveMapping(mapping)
+                if (effective) return@filter false
 
-        val configured = dto.mappings
-            .filter { MappingStatusResolver.isEffectiveMapping(it) }
-            .map { it.targetField }
-            .toSet()
+                val system = systemFieldClassifier.isSystemField(path)
+                if (system) {
+                    // Incomplete manual override on a system field still blocks codegen
+                    mapping != null && mapping.mappingType != MappingType.IGNORE
+                } else {
+                    true
+                }
+            }
 
-        val missing = requiredPaths.filter { it !in configured }
         return RequiredCheckResult(passed = missing.isEmpty(), missingRequiredFields = missing)
     }
 
@@ -251,7 +280,11 @@ class MappingApplicationService(
             )
         }
 
-        val merged = if (targetSchema != null) mergeWithSchemaLeaves(raw, targetSchema) else raw
+        val merged = if (targetSchema != null) {
+            mappingSchemaMerger.mergeMappingsWithTargetSchema(raw, targetSchema)
+        } else {
+            raw
+        }
         val enriched = mappingStatusResolver.enrichAll(merged)
         return MappingConfigurationDto(
             id = config.id,
@@ -264,48 +297,8 @@ class MappingApplicationService(
         )
     }
 
-    /**
-     * Ensure every target schema leaf has a mapping row (for「全部字段」≈ leaf count).
-     */
-    private fun mergeWithSchemaLeaves(
-        mappings: List<FieldMappingDto>,
-        targetSchema: SchemaTree
-    ): List<FieldMappingDto> {
-        val byTarget = mappings.associateBy { it.targetField }.toMutableMap()
-        for (leaf in leafFields(targetSchema)) {
-            if (leaf.path !in byTarget) {
-                byTarget[leaf.path] = FieldMappingDto(
-                    targetField = leaf.path,
-                    targetFieldName = leaf.name,
-                    mappingType = MappingType.IGNORE,
-                    targetRequired = leaf.required,
-                    confidence = null
-                )
-            } else {
-                val existing = byTarget[leaf.path]!!
-                byTarget[leaf.path] = existing.copy(
-                    targetFieldName = existing.targetFieldName ?: leaf.name,
-                    targetRequired = leaf.required
-                )
-            }
-        }
-        return byTarget.values.toList()
-    }
-
     private fun leafFields(schema: SchemaTree): List<SchemaField> =
-        flatten(schema.fields).filter { it.children.isEmpty() }
-
-    private fun flatten(fields: List<SchemaField>): List<SchemaField> {
-        val result = mutableListOf<SchemaField>()
-        fun walk(list: List<SchemaField>) {
-            list.forEach { f ->
-                result.add(f)
-                if (f.children.isNotEmpty()) walk(f.children)
-            }
-        }
-        walk(fields)
-        return result
-    }
+        mappingSchemaMerger.leafFields(schema)
 
     private fun generateDto(config: MappingConfiguration): GeneratedFileDto {
         val content = buildString {

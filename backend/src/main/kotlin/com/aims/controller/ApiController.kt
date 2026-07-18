@@ -57,6 +57,10 @@ class ApiController(
     fun checkRequired(@RequestBody dto: MappingConfigurationDto): ApiResponse<RequiredCheckResult> =
         ApiResponse(data = mappingService.checkRequired(dto))
 
+    @PostMapping("/mappings/reconcile-schema")
+    fun reconcileSchema(@RequestBody request: ReconcileSchemaRequest): ApiResponse<ReconcileSchemaResponse> =
+        ApiResponse(data = mappingService.reconcileSchema(request))
+
     @PostMapping("/code-generation")
     fun generateCode(@RequestBody request: CodeGenerationRequest): ApiResponse<CodeGenerationResponse> =
         ApiResponse(data = mappingService.generateCode(request))

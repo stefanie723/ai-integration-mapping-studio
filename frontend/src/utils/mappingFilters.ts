@@ -21,10 +21,17 @@ const PENDING_ORDER: Record<string, number> = {
   AI_RECOMMENDED: 2
 }
 
+/** FEntity[].FCreatorId.FNumber → [FEntity, FCreatorId, FNumber] */
+export function normalizePathSegments(path: string): string[] {
+  return path
+    .split('.')
+    .map((s) => s.replace(/\[\]/g, '').trim())
+    .filter(Boolean)
+}
+
 export function isSystemField(targetField: string): boolean {
   if (!targetField) return false
-  const leaf = targetField.split('.').pop()?.replace(/^\[\]/, '') || targetField
-  return SYSTEM_FIELD_CODES.has(leaf) || SYSTEM_FIELD_CODES.has(targetField)
+  return normalizePathSegments(targetField).some((seg) => SYSTEM_FIELD_CODES.has(seg))
 }
 
 export function isEffectiveMapping(m: FieldMapping): boolean {
@@ -49,14 +56,21 @@ export function isAiSuggestion(m: FieldMapping): boolean {
   return !!m.sourceField?.trim() || !!m.fixedValue?.trim() || !!m.defaultValue?.trim()
 }
 
+/** Keep in sync with backend MappingStatusResolver */
 export function resolveStatus(m: FieldMapping): MappingStatus {
   const effective = isEffectiveMapping(m)
   const ai = isAiSuggestion(m)
+  const system = isSystemField(m.targetField)
+  const confidence = m.confidence ?? 0
+
+  if (m.confirmed && effective) return 'CONFIRMED'
+  if (effective && !m.confirmed && ai && confidence < 0.9) return 'NEED_CONFIRM'
+  if (effective && !m.confirmed && ai) return 'AI_RECOMMENDED'
+  if (effective && !m.confirmed) return 'UNMAPPED'
+  if (!effective && system) return 'SYSTEM_FIELD'
   if (m.targetRequired && !effective) return 'REQUIRED_UNMAPPED'
-  if (ai && !m.confirmed && (m.confidence ?? 0) < 0.9) return 'NEED_CONFIRM'
+  if (ai && !m.confirmed && confidence < 0.9) return 'NEED_CONFIRM'
   if (ai && !m.confirmed) return 'AI_RECOMMENDED'
-  if (m.confirmed) return 'CONFIRMED'
-  if (isSystemField(m.targetField)) return 'SYSTEM_FIELD'
   if (m.mappingType === 'IGNORE') return 'IGNORED'
   return 'UNMAPPED'
 }

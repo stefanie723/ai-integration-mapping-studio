@@ -3,7 +3,7 @@
     <header class="toolbar">
       <div class="brand">
         <div class="brand-name">AI Integration Mapping Studio</div>
-        <div class="brand-sub">AI 接口字段映射工作台 · V0.2.1</div>
+        <div class="brand-sub">AI 接口字段映射工作台 · V0.2.2</div>
       </div>
       <div class="controls">
         <el-select v-model="customerId" placeholder="选择客户" style="width: 160px">
@@ -121,7 +121,7 @@
               <el-select
                 v-model="row.mappingType"
                 size="small"
-                :disabled="row.status === 'SYSTEM_FIELD' && !editingTarget"
+                :disabled="isSystemFieldLocked(row)"
                 @change="onTypeChange(row)"
               >
                 <el-option label="直接映射" value="DIRECT" />
@@ -142,6 +142,7 @@
                   filterable
                   size="small"
                   placeholder="选择源字段"
+                  :disabled="isSystemFieldLocked(row)"
                   @change="refreshLocalStatus"
                 >
                   <el-option v-for="p in sourcePaths" :key="p" :label="p" :value="p" />
@@ -151,6 +152,7 @@
                   v-model="row.fixedValue"
                   size="small"
                   placeholder="固定值"
+                  :disabled="isSystemFieldLocked(row)"
                   @change="refreshLocalStatus"
                 />
                 <el-input
@@ -158,16 +160,38 @@
                   v-model="row.defaultValue"
                   size="small"
                   placeholder="默认值"
+                  :disabled="isSystemFieldLocked(row)"
                   @change="refreshLocalStatus"
                 />
                 <div v-if="row.mappingType === 'DICTIONARY'" class="dict-box">
                   <div v-for="(pair, idx) in dictRows(row)" :key="idx" class="dict-row">
-                    <el-input v-model="pair.from" size="small" placeholder="源值" @change="syncDict(row)" />
+                    <el-input
+                      v-model="pair.from"
+                      size="small"
+                      placeholder="源值"
+                      :disabled="isSystemFieldLocked(row)"
+                      @change="syncDict(row)"
+                    />
                     <span>→</span>
-                    <el-input v-model="pair.to" size="small" placeholder="目标值" @change="syncDict(row)" />
-                    <el-button link type="danger" @click="removeDictRow(row, idx)">删</el-button>
+                    <el-input
+                      v-model="pair.to"
+                      size="small"
+                      placeholder="目标值"
+                      :disabled="isSystemFieldLocked(row)"
+                      @change="syncDict(row)"
+                    />
+                    <el-button
+                      link
+                      type="danger"
+                      :disabled="isSystemFieldLocked(row)"
+                      @click="removeDictRow(row, idx)"
+                    >
+                      删
+                    </el-button>
                   </div>
-                  <el-button size="small" @click="addDictRow(row)">新增规则</el-button>
+                  <el-button size="small" :disabled="isSystemFieldLocked(row)" @click="addDictRow(row)">
+                    新增规则
+                  </el-button>
                 </div>
               </div>
             </template>
@@ -203,6 +227,7 @@
               </template>
               <template v-else-if="row.status === 'SYSTEM_FIELD'">
                 <span class="muted">系统字段</span>
+                <el-button link type="primary" @click="enableSystemFieldEdit(row)">手工配置</el-button>
               </template>
               <template v-else-if="row.status === 'IGNORED'">
                 <span class="muted">已忽略</span>
@@ -295,7 +320,8 @@ const activeView = ref<MappingView>('pending')
 const mappingKeyword = ref('')
 const highlightSourceField = ref<string | null>(null)
 const focusTargetField = ref<string | null>(null)
-const editingTarget = ref(true)
+/** Target fields the user explicitly chose to override (SYSTEM_FIELD unlock) */
+const manuallyEditingSystemFields = ref<Set<string>>(new Set())
 
 const loadingRecommend = ref(false)
 const loadingSave = ref(false)
@@ -373,15 +399,55 @@ async function onRefreshKingdeeSchema() {
   }
   loadingKingdeeRefresh.value = true
   try {
-    targetSchema.value = await api.getKingdeeSchema(customerId.value, targetFormId.value, true)
+    if (mappings.value.length) {
+      const res = await api.reconcileSchema({
+        customerId: customerId.value,
+        targetFormId: targetFormId.value,
+        refresh: true,
+        mappings: mappings.value
+      })
+      targetSchema.value = res.targetSchema
+      mappings.value = recomputeStatuses(res.mappings)
+      summary.value = res.summary ?? buildSummary(mappings.value)
+      ElMessage.success(`Schema 已刷新并同步 Mapping（全部字段 ${summary.value.totalFields}）`)
+    } else {
+      targetSchema.value = await api.getKingdeeSchema(customerId.value, targetFormId.value, true)
+      ElMessage.success('已从 Kingdee MCP 刷新 Schema')
+    }
     await refreshKingdeeStatus()
-    ElMessage.success('已从 Kingdee MCP 刷新 Schema')
   } catch (e: any) {
     ElMessage.error(e.message || '刷新失败')
     await refreshKingdeeStatus()
   } finally {
     loadingKingdeeRefresh.value = false
   }
+}
+
+function isSystemFieldLocked(row: FieldMapping): boolean {
+  return row.status === 'SYSTEM_FIELD' && !manuallyEditingSystemFields.value.has(row.targetField)
+}
+
+async function enableSystemFieldEdit(row: FieldMapping) {
+  try {
+    await ElMessageBox.confirm(
+      '该字段被识别为金蝶系统管理字段，通常无需在接口中传入。\n确认仍然要手工配置该字段吗？',
+      '手工配置系统字段',
+      { confirmButtonText: '继续配置', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  const next = new Set(manuallyEditingSystemFields.value)
+  next.add(row.targetField)
+  manuallyEditingSystemFields.value = next
+  if (row.mappingType === 'IGNORE') {
+    row.mappingType = 'DIRECT'
+  }
+  row.confirmed = false
+  refreshLocalStatus()
+  activeView.value = 'all'
+  focusTargetField.value = row.targetField
+  ElMessage.info(`已解锁：${row.targetField}`)
 }
 
 function flattenPaths(fields: SchemaField[]): string[] {

@@ -25,6 +25,20 @@ class MappingStatusResolverTest {
     }
 
     @Test
+    fun `required system field without config is SYSTEM_FIELD not REQUIRED_UNMAPPED`() {
+        val status = resolver.resolve(
+            FieldMappingDto(
+                targetField = "FCreatorId.FNumber",
+                mappingType = MappingType.IGNORE,
+                targetRequired = true,
+                confidence = null,
+                confirmed = false
+            )
+        )
+        assertEquals(MappingStatus.SYSTEM_FIELD, status)
+    }
+
+    @Test
     fun `low confidence AI suggestion is NEED_CONFIRM`() {
         val status = resolver.resolve(
             FieldMappingDto(
@@ -68,16 +82,17 @@ class MappingStatusResolverTest {
     }
 
     @Test
-    fun `system field without AI suggestion is SYSTEM_FIELD`() {
+    fun `manual effective override on system field is not forced SYSTEM_FIELD`() {
         val status = resolver.resolve(
             FieldMappingDto(
-                targetField = "FCreatorId",
-                mappingType = MappingType.IGNORE,
-                confidence = null,
-                confirmed = false
+                targetField = "FCreatorId.FNumber",
+                mappingType = MappingType.DIRECT,
+                sourceField = "creatorCode",
+                confirmed = true,
+                targetRequired = true
             )
         )
-        assertEquals(MappingStatus.SYSTEM_FIELD, status)
+        assertEquals(MappingStatus.CONFIRMED, status)
     }
 
     @Test
@@ -111,17 +126,19 @@ class MappingStatusResolverTest {
                     confirmed = false
                 ),
                 FieldMappingDto(
-                    targetField = "FCreatorId",
+                    targetField = "FCreatorId.FNumber",
                     mappingType = MappingType.IGNORE,
+                    targetRequired = true,
                     confidence = null
                 )
             )
         )
         val summary = resolver.summarize(mappings)
         assertEquals(3, summary.totalFields)
-        assertEquals(1, summary.requiredFields)
+        assertEquals(2, summary.requiredFields)
         assertEquals(1, summary.requiredUnmappedFields)
         assertEquals(2, summary.pendingFields)
         assertTrue(summary.configuredFields >= 1)
+        assertEquals(MappingStatus.SYSTEM_FIELD, mappings[2].status)
     }
 }
