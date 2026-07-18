@@ -3,7 +3,7 @@
     <header class="toolbar">
       <div class="brand">
         <div class="brand-name">AI Integration Mapping Studio</div>
-        <div class="brand-sub">AI 接口字段映射工作台 · Phase 1</div>
+        <div class="brand-sub">AI 接口字段映射工作台 · V0.2</div>
       </div>
       <div class="controls">
         <el-select v-model="customerId" placeholder="选择客户" style="width: 160px">
@@ -34,7 +34,12 @@
     </div>
 
     <div class="workspace">
-      <SchemaTreePanel title="源系统 Schema" :schema="sourceSchema" />
+      <SchemaTreePanel
+        title="源系统 Schema"
+        :schema="sourceSchema"
+        source-label="数据来源: Mock"
+        :source-connected="false"
+      />
 
       <div class="mapping-panel">
         <div class="panel-head">
@@ -125,7 +130,15 @@
         </div>
       </div>
 
-      <SchemaTreePanel title="金蝶 Schema" :schema="targetSchema" />
+      <SchemaTreePanel
+        title="金蝶 Schema"
+        :schema="targetSchema"
+        :source-label="kingdeeSourceLabel"
+        :source-connected="kingdeeConnected"
+        :show-refresh="!!customerId && !!targetFormId"
+        :refreshing="loadingKingdeeRefresh"
+        @refresh="onRefreshKingdeeSchema"
+      />
     </div>
 
     <el-dialog v-model="codeVisible" title="生成的 Kotlin 代码" width="780px">
@@ -167,13 +180,36 @@ const missingRequired = ref<string[]>([])
 const loadingRecommend = ref(false)
 const loadingSave = ref(false)
 const loadingCode = ref(false)
+const loadingKingdeeRefresh = ref(false)
 const codeVisible = ref(false)
 const generatedFiles = ref<GeneratedFile[]>([])
+const kingdeeMode = ref('mock')
+const kingdeeConnected = ref(false)
+const kingdeeSourceLabel = ref('数据来源: Mock')
 
 /** local editable dictionary rows keyed by targetField */
 const dictCache = reactive<Record<string, { from: string; to: string }[]>>({})
 
 const sourcePaths = computed(() => flattenPaths(sourceSchema.value?.fields || []))
+
+async function refreshKingdeeStatus() {
+  try {
+    const status = await api.getKingdeeMcpStatus()
+    kingdeeMode.value = status.mode
+    kingdeeConnected.value = status.connected && status.mode === 'real'
+    if (status.mode === 'real') {
+      kingdeeSourceLabel.value = status.connected
+        ? '数据来源: Kingdee MCP · 已连接'
+        : `数据来源: Kingdee MCP · 未连接`
+    } else {
+      kingdeeSourceLabel.value = '数据来源: Mock'
+      kingdeeConnected.value = false
+    }
+  } catch {
+    kingdeeSourceLabel.value = '数据来源: 未知'
+    kingdeeConnected.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -181,10 +217,29 @@ onMounted(async () => {
     scenarios.value = await api.getScenarios()
     if (customers.value.length) customerId.value = customers.value[0].id
     if (scenarios.value.length) scenarioCode.value = scenarios.value[0].code
+    await refreshKingdeeStatus()
   } catch (e: any) {
     ElMessage.error(e.message || '初始化失败')
   }
 })
+
+async function onRefreshKingdeeSchema() {
+  if (!customerId.value || !targetFormId.value) {
+    ElMessage.warning('请先选择客户并加载场景 Schema')
+    return
+  }
+  loadingKingdeeRefresh.value = true
+  try {
+    targetSchema.value = await api.getKingdeeSchema(customerId.value, targetFormId.value, true)
+    await refreshKingdeeStatus()
+    ElMessage.success('已从 Kingdee MCP 刷新 Schema')
+  } catch (e: any) {
+    ElMessage.error(e.message || '刷新失败')
+    await refreshKingdeeStatus()
+  } finally {
+    loadingKingdeeRefresh.value = false
+  }
+}
 
 function flattenPaths(fields: SchemaField[]): string[] {
   const result: string[] = []

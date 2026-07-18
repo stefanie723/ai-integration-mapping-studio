@@ -9,6 +9,12 @@ import com.aims.domain.schema.SchemaTree
 interface KingdeeMcpClient {
     fun listForms(customerId: Long): List<KingdeeFormInfo>
     fun getFormSchema(customerId: Long, formId: String): SchemaTree
+
+    /**
+     * @param refresh true to bypass schema cache and re-fetch from KingdeeMCP
+     */
+    fun getFormSchema(customerId: Long, formId: String, refresh: Boolean): SchemaTree =
+        getFormSchema(customerId, formId)
 }
 
 data class KingdeeFormInfo(

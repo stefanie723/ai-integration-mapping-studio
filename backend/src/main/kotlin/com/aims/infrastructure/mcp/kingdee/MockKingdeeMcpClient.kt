@@ -6,12 +6,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
 @Component
-@ConditionalOnProperty(name = ["aims.mcp.kingdee.mode"], havingValue = "mock", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "aims.mcp.kingdee", name = ["mode"], havingValue = "mock", matchIfMissing = true)
 class MockKingdeeMcpClient : KingdeeMcpClient {
 
     override fun listForms(customerId: Long): List<KingdeeFormInfo> = listOf(
         KingdeeFormInfo(formId = "PUR_PurchaseOrder", name = "Purchase Order")
     )
+
+    override fun getFormSchema(customerId: Long, formId: String, refresh: Boolean): SchemaTree =
+        getFormSchema(customerId, formId)
 
     override fun getFormSchema(customerId: Long, formId: String): SchemaTree {
         require(formId == "PUR_PurchaseOrder") {

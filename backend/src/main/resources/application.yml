@@ -9,6 +9,8 @@ server:
 spring:
   application:
     name: ai-integration-mapping-studio
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev,local}
   datasource:
     url: jdbc:h2:file:./data/aims;MODE=MySQL;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
     driver-class-name: org.h2.Driver
@@ -28,13 +30,35 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=200,expireAfterWrite=10m
 
 aims:
   mcp:
     company:
       mode: mock
     kingdee:
-      mode: mock
+      # mock | real — local credentials go in application-local.yml (gitignored)
+      mode: ${AIMS_KINGDEE_MCP_MODE:mock}
+      # stdio (spawn KingdeeMCP) | sse (connect URL)
+      transport: ${AIMS_KINGDEE_MCP_TRANSPORT:stdio}
+      url: ${AIMS_KINGDEE_MCP_URL:http://localhost:8081}
+      timeout: 60000
+      metadata-tool: kingdee_get_fields
+      list-forms-tool: kingdee_list_forms
+      stdio:
+        command: ${AIMS_KINGDEE_MCP_COMMAND:uvx}
+        args:
+          - kingdee-mcp
+        env:
+          KINGDEE_SERVER_URL: ${KINGDEE_SERVER_URL:}
+          KINGDEE_ACCT_ID: ${KINGDEE_ACCT_ID:}
+          KINGDEE_USERNAME: ${KINGDEE_USERNAME:}
+          KINGDEE_APP_ID: ${KINGDEE_APP_ID:}
+          KINGDEE_APP_SEC: ${KINGDEE_APP_SEC:}
+          KINGDEE_LCID: ${KINGDEE_LCID:2052}
   ai:
     provider: mock
     openai:

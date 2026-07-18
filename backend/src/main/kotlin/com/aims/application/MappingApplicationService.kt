@@ -46,10 +46,14 @@ class MappingApplicationService(
         return companyMcpClient.getApiSchema(api)
     }
 
-    fun getKingdeeSchema(customerId: Long, formId: String): com.aims.domain.schema.SchemaTree {
+    fun getKingdeeSchema(
+        customerId: Long,
+        formId: String,
+        refresh: Boolean = false
+    ): com.aims.domain.schema.SchemaTree {
         customerRepository.findById(customerId)
             .orElseThrow { IllegalArgumentException("客户不存在: $customerId") }
-        return kingdeeMcpClient.getFormSchema(customerId, formId)
+        return kingdeeMcpClient.getFormSchema(customerId, formId, refresh)
     }
 
     fun recommend(request: RecommendRequest): RecommendResponse {

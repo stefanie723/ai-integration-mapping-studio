@@ -1,6 +1,7 @@
 package com.aims.controller
 
 import com.aims.application.dto.ApiResponse
+import com.aims.infrastructure.mcp.core.McpException
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.ResponseStatus
@@ -17,6 +18,11 @@ class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException::class)
     @ResponseStatus(HttpStatus.CONFLICT)
     fun handleConflict(ex: IllegalStateException): ApiResponse<Nothing> =
+        ApiResponse(success = false, message = ex.message)
+
+    @ExceptionHandler(McpException::class)
+    @ResponseStatus(HttpStatus.BAD_GATEWAY)
+    fun handleMcp(ex: McpException): ApiResponse<Nothing> =
         ApiResponse(success = false, message = ex.message)
 
     @ExceptionHandler(Exception::class)

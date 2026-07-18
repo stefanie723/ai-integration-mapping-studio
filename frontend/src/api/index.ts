@@ -16,11 +16,26 @@ const http = axios.create({
 })
 
 async function unwrap<T>(promise: Promise<{ data: ApiResponse<T> }>): Promise<T> {
-  const { data } = await promise
-  if (!data.success) {
-    throw new Error(data.message || '请求失败')
+  try {
+    const { data } = await promise
+    if (!data.success) {
+      throw new Error(data.message || '请求失败')
+    }
+    return data.data as T
+  } catch (e: any) {
+    const msg = e?.response?.data?.message || e?.message || '请求失败'
+    throw new Error(msg)
   }
-  return data.data as T
+}
+
+export interface KingdeeMcpStatus {
+  mode: string
+  connected: boolean
+  server: string
+  transport?: string
+  metadataToolAvailable: boolean
+  availableTools?: string[]
+  message?: string
 }
 
 export const api = {
@@ -28,8 +43,13 @@ export const api = {
   getScenarios: () => unwrap(http.get<ApiResponse<Scenario[]>>('/integration-scenarios')),
   getSourceSchema: (scenarioCode: string) =>
     unwrap(http.get<ApiResponse<SchemaTree>>('/schemas/source', { params: { scenarioCode } })),
-  getKingdeeSchema: (customerId: number, formId: string) =>
-    unwrap(http.get<ApiResponse<SchemaTree>>('/schemas/kingdee', { params: { customerId, formId } })),
+  getKingdeeSchema: (customerId: number, formId: string, refresh = false) =>
+    unwrap(
+      http.get<ApiResponse<SchemaTree>>('/schemas/kingdee', {
+        params: { customerId, formId, refresh }
+      })
+    ),
+  getKingdeeMcpStatus: () => unwrap(http.get<ApiResponse<KingdeeMcpStatus>>('/mcp/kingdee/status')),
   recommend: (customerId: number, scenarioCode: string) =>
     unwrap(http.post<ApiResponse<RecommendResponse>>('/mappings/recommend', { customerId, scenarioCode })),
   getMapping: (customerId: number, scenarioCode: string) =>

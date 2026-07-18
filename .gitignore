@@ -22,6 +22,8 @@ frontend/.vite/
 .env.*
 !.env.example
 *.pem
+backend/src/main/resources/application-local.yml
+**/application-local.yml
 
 # Logs
 *.log

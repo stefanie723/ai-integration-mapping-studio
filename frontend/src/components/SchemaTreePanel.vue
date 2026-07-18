@@ -1,6 +1,21 @@
 <template>
   <div class="schema-panel">
-    <div class="panel-title">{{ title }}</div>
+    <div class="panel-head">
+      <div class="panel-title">{{ title }}</div>
+      <div class="panel-meta">
+        <span v-if="sourceLabel" class="source-badge" :class="sourceConnected ? 'ok' : 'off'">
+          {{ sourceConnected ? '●' : '○' }} {{ sourceLabel }}
+        </span>
+        <el-button
+          v-if="showRefresh"
+          size="small"
+          :loading="refreshing"
+          @click="$emit('refresh')"
+        >
+          刷新 Schema
+        </el-button>
+      </div>
+    </div>
     <el-input
       v-model="keyword"
       size="small"
@@ -47,12 +62,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { ElTree } from 'element-plus'
-import type { SchemaField, SchemaTree } from '../../types'
+import type { SchemaField, SchemaTree } from '../types'
 
 const props = defineProps<{
   title: string
   schema: SchemaTree | null
+  sourceLabel?: string
+  sourceConnected?: boolean
+  showRefresh?: boolean
+  refreshing?: boolean
 }>()
+
+defineEmits<{ refresh: [] }>()
 
 const keyword = ref('')
 const selected = ref<SchemaField | null>(null)
@@ -108,9 +129,36 @@ function onNodeClick(data: SchemaField) {
   overflow: hidden;
 }
 
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .panel-title {
   font-weight: 600;
-  margin-bottom: 8px;
+}
+
+.panel-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.source-badge {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.source-badge.ok {
+  color: var(--success);
+}
+
+.source-badge.off {
+  color: var(--muted);
 }
 
 .search {
