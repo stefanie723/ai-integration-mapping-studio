@@ -26,7 +26,7 @@ data class MappingRecommendationItem(
     val mappingType: MappingType = MappingType.DIRECT,
     val fixedValue: String? = null,
     val defaultValue: String? = null,
-    val confidence: Double = 0.0,
+    val confidence: Double? = null,
     val reason: String? = null,
     val needConfirm: Boolean = false
 )

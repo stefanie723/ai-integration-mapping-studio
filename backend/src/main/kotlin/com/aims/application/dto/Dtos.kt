@@ -1,5 +1,6 @@
 package com.aims.application.dto
 
+import com.aims.domain.mapping.MappingStatus
 import com.aims.domain.mapping.MappingType
 
 data class CustomerDto(
@@ -35,7 +36,17 @@ data class FieldMappingDto(
     val aiReason: String? = null,
     val confirmed: Boolean = false,
     val targetRequired: Boolean = false,
-    val needConfirm: Boolean = false
+    val needConfirm: Boolean = false,
+    val status: MappingStatus? = null
+)
+
+data class MappingSummary(
+    val totalFields: Int,
+    val requiredFields: Int,
+    val configuredFields: Int,
+    val confirmedFields: Int,
+    val pendingFields: Int,
+    val requiredUnmappedFields: Int
 )
 
 data class MappingConfigurationDto(
@@ -44,7 +55,8 @@ data class MappingConfigurationDto(
     val scenarioCode: String,
     val sourceApi: String,
     val targetFormId: String,
-    val mappings: List<FieldMappingDto>
+    val mappings: List<FieldMappingDto>,
+    val summary: MappingSummary? = null
 )
 
 data class RecommendResponse(
@@ -54,7 +66,8 @@ data class RecommendResponse(
     val targetFormId: String,
     val sourceSchema: com.aims.domain.schema.SchemaTree,
     val targetSchema: com.aims.domain.schema.SchemaTree,
-    val mappings: List<FieldMappingDto>
+    val mappings: List<FieldMappingDto>,
+    val summary: MappingSummary? = null
 )
 
 data class RequiredCheckResult(

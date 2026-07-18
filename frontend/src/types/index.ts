@@ -8,6 +8,17 @@ export type MappingType =
   | 'LOOKUP'
   | 'IGNORE'
 
+export type MappingStatus =
+  | 'AI_RECOMMENDED'
+  | 'NEED_CONFIRM'
+  | 'REQUIRED_UNMAPPED'
+  | 'CONFIRMED'
+  | 'IGNORED'
+  | 'SYSTEM_FIELD'
+  | 'UNMAPPED'
+
+export type MappingView = 'pending' | 'required' | 'configured' | 'all'
+
 export interface Customer {
   id: number
   code: string
@@ -55,6 +66,16 @@ export interface FieldMapping {
   confirmed: boolean
   targetRequired: boolean
   needConfirm?: boolean
+  status?: MappingStatus
+}
+
+export interface MappingSummary {
+  totalFields: number
+  requiredFields: number
+  configuredFields: number
+  confirmedFields: number
+  pendingFields: number
+  requiredUnmappedFields: number
 }
 
 export interface MappingConfiguration {
@@ -64,6 +85,7 @@ export interface MappingConfiguration {
   sourceApi: string
   targetFormId: string
   mappings: FieldMapping[]
+  summary?: MappingSummary
 }
 
 export interface RecommendResponse {
@@ -74,6 +96,7 @@ export interface RecommendResponse {
   sourceSchema: SchemaTree
   targetSchema: SchemaTree
   mappings: FieldMapping[]
+  summary?: MappingSummary
 }
 
 export interface RequiredCheckResult {

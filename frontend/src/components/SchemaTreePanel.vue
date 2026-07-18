@@ -52,9 +52,21 @@
       <div v-if="selected.lookUpObject" class="row">
         <label>引用对象</label><span>{{ selected.lookUpObject }}</span>
       </div>
+      <div v-if="selected.group" class="row">
+        <label>所属实体</label><span>{{ selected.group }}</span>
+      </div>
       <div v-if="selected.description" class="row">
         <label>说明</label><span>{{ selected.description }}</span>
       </div>
+      <el-button
+        v-if="showAddToMapping && isLeaf(selected)"
+        type="primary"
+        size="small"
+        class="add-btn"
+        @click="$emit('add-to-mapping', selected)"
+      >
+        添加到 Mapping
+      </el-button>
     </div>
   </div>
 </template>
@@ -71,9 +83,15 @@ const props = defineProps<{
   sourceConnected?: boolean
   showRefresh?: boolean
   refreshing?: boolean
+  /** Show「添加到 Mapping」for leaf fields (Kingdee panel) */
+  showAddToMapping?: boolean
 }>()
 
-defineEmits<{ refresh: [] }>()
+const emit = defineEmits<{
+  refresh: []
+  'add-to-mapping': [field: SchemaField]
+  'field-select': [field: SchemaField]
+}>()
 
 const keyword = ref('')
 const selected = ref<SchemaField | null>(null)
@@ -112,8 +130,15 @@ function filterNode(value: string, data: SchemaField) {
   )
 }
 
+function isLeaf(field: SchemaField) {
+  return !field.children?.length
+}
+
 function onNodeClick(data: SchemaField) {
   selected.value = data
+  if (isLeaf(data) && data.path !== props.schema?.rootId) {
+    emit('field-select', data)
+  }
 }
 </script>
 
@@ -201,6 +226,11 @@ function onNodeClick(data: SchemaField) {
 
 .row label {
   color: var(--muted);
+}
+
+.add-btn {
+  margin-top: 8px;
+  width: 100%;
 }
 
 :deep(.el-tree) {

@@ -4,16 +4,19 @@ import com.aims.domain.mapping.MappingHistory
 import com.aims.domain.mapping.MappingType
 import com.aims.domain.schema.SchemaField
 import com.aims.domain.schema.SchemaTree
+import com.aims.infrastructure.mcp.kingdee.KingdeeSystemFieldClassifier
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.stereotype.Component
 
 /**
- * Rule-based mock AI for Phase 1.
+ * Rule-based mock AI for Phase 1 / V0.2.1.
  * Only recommends against real target fields from Kingdee schema — never invents fields.
  */
 @Component
 @ConditionalOnProperty(name = ["aims.ai.provider"], havingValue = "mock", matchIfMissing = true)
-class MockAiMappingProvider : AiMappingProvider {
+class MockAiMappingProvider(
+    private val systemFieldClassifier: KingdeeSystemFieldClassifier
+) : AiMappingProvider {
 
     private val knownRules: List<RecommendRule> = listOf(
         RecommendRule("FBillNo", "orderNo", MappingType.DIRECT, 0.98, "源字段为订单编号，目标字段为金蝶单据编号"),
@@ -51,14 +54,23 @@ class MockAiMappingProvider : AiMappingProvider {
                     reason = rule.reason + if (usage > 0) "（历史确认 ${usage} 次）" else "",
                     needConfirm = rule.needConfirm || confidence < 0.6
                 )
+            } else if (systemFieldClassifier.isSystemField(target)) {
+                MappingRecommendationItem(
+                    targetField = target.path,
+                    sourceField = null,
+                    mappingType = MappingType.IGNORE,
+                    confidence = null,
+                    reason = "系统字段，无需人工 Mapping",
+                    needConfirm = false
+                )
             } else {
                 MappingRecommendationItem(
                     targetField = target.path,
                     sourceField = null,
                     mappingType = MappingType.IGNORE,
-                    confidence = 0.3,
-                    reason = "无法确定映射，标记 NEED_CONFIRM",
-                    needConfirm = true
+                    confidence = null,
+                    reason = "未匹配到可用映射，默认忽略",
+                    needConfirm = false
                 )
             }
         }

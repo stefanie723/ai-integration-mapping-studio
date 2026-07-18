@@ -1,11 +1,13 @@
 package com.aims.application
 
 import com.aims.application.dto.*
+import com.aims.application.mapping.MappingStatusResolver
 import com.aims.domain.mapping.FieldMapping
 import com.aims.domain.mapping.MappingConfiguration
 import com.aims.domain.mapping.MappingHistory
 import com.aims.domain.mapping.MappingType
 import com.aims.domain.schema.SchemaField
+import com.aims.domain.schema.SchemaTree
 import com.aims.infrastructure.ai.AiMappingProvider
 import com.aims.infrastructure.mcp.company.CompanyMcpClient
 import com.aims.infrastructure.mcp.kingdee.KingdeeMcpClient
@@ -27,6 +29,7 @@ class MappingApplicationService(
     private val companyMcpClient: CompanyMcpClient,
     private val kingdeeMcpClient: KingdeeMcpClient,
     private val aiMappingProvider: AiMappingProvider,
+    private val mappingStatusResolver: MappingStatusResolver,
     private val objectMapper: ObjectMapper
 ) {
 
@@ -38,7 +41,7 @@ class MappingApplicationService(
             ScenarioDto(it.id!!, it.code, it.name, it.sourceApi, it.targetFormId)
         }
 
-    fun getSourceSchema(scenarioCode: String): com.aims.domain.schema.SchemaTree {
+    fun getSourceSchema(scenarioCode: String): SchemaTree {
         val scenario = scenarioRepository.findByCode(scenarioCode)
             ?: throw IllegalArgumentException("场景不存在: $scenarioCode")
         val api = scenario.sourceApi
@@ -50,7 +53,7 @@ class MappingApplicationService(
         customerId: Long,
         formId: String,
         refresh: Boolean = false
-    ): com.aims.domain.schema.SchemaTree {
+    ): SchemaTree {
         customerRepository.findById(customerId)
             .orElseThrow { IllegalArgumentException("客户不存在: $customerId") }
         return kingdeeMcpClient.getFormSchema(customerId, formId, refresh)
@@ -72,9 +75,9 @@ class MappingApplicationService(
         val history = mappingHistoryRepository.findByTargetFormId(targetFormId)
 
         val recommendation = aiMappingProvider.recommend(sourceSchema, targetSchema, history)
-        val targetLeaves = flatten(targetSchema.fields).associateBy { it.path }
+        val targetLeaves = leafFields(targetSchema).associateBy { it.path }
 
-        val mappings = recommendation.mappings.map { item ->
+        val rawMappings = recommendation.mappings.map { item ->
             val target = targetLeaves[item.targetField]
             FieldMappingDto(
                 targetField = item.targetField,
@@ -87,9 +90,13 @@ class MappingApplicationService(
                 aiReason = item.reason,
                 confirmed = false,
                 targetRequired = target?.required == true,
-                needConfirm = item.needConfirm || item.confidence < 0.6
+                needConfirm = item.needConfirm
             )
         }
+
+        val merged = mergeWithSchemaLeaves(rawMappings, targetSchema)
+        val enriched = mappingStatusResolver.enrichAll(merged)
+        val summary = mappingStatusResolver.summarize(enriched)
 
         return RecommendResponse(
             customerId = request.customerId,
@@ -98,7 +105,8 @@ class MappingApplicationService(
             targetFormId = targetFormId,
             sourceSchema = sourceSchema,
             targetSchema = targetSchema,
-            mappings = mappings
+            mappings = enriched,
+            summary = summary
         )
     }
 
@@ -114,6 +122,13 @@ class MappingApplicationService(
             .orElseThrow { IllegalArgumentException("客户不存在: ${dto.customerId}") }
         scenarioRepository.findByCode(dto.scenarioCode)
             ?: throw IllegalArgumentException("场景不存在: ${dto.scenarioCode}")
+
+        val forbiddenIgnore = dto.mappings.filter { it.targetRequired && it.mappingType == MappingType.IGNORE }
+        if (forbiddenIgnore.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "必填字段不允许忽略: ${forbiddenIgnore.joinToString { it.targetField }}"
+            )
+        }
 
         val existing = mappingConfigurationRepository.findByCustomerIdAndScenarioCode(
             dto.customerId, dto.scenarioCode
@@ -148,7 +163,6 @@ class MappingApplicationService(
 
         val saved = mappingConfigurationRepository.save(toSave)
 
-        // Persist history for confirmed DIRECT mappings
         saved.mappings.filter { it.confirmed && it.mappingType != MappingType.IGNORE && !it.sourceField.isNullOrBlank() }
             .forEach { recordHistory(it, saved.targetFormId) }
 
@@ -157,21 +171,13 @@ class MappingApplicationService(
 
     fun checkRequired(dto: MappingConfigurationDto): RequiredCheckResult {
         val targetSchema = kingdeeMcpClient.getFormSchema(dto.customerId, dto.targetFormId)
-        val requiredPaths = flatten(targetSchema.fields)
-            .filter { it.required && it.children.isEmpty() }
+        val requiredPaths = leafFields(targetSchema)
+            .filter { it.required }
             .map { it.path }
             .toSet()
 
         val configured = dto.mappings
-            .filter { it.mappingType != MappingType.IGNORE }
-            .filter {
-                when (it.mappingType) {
-                    MappingType.CONSTANT -> !it.fixedValue.isNullOrBlank()
-                    MappingType.DIRECT, MappingType.DICTIONARY -> !it.sourceField.isNullOrBlank()
-                    MappingType.DEFAULT -> !it.sourceField.isNullOrBlank() || !it.defaultValue.isNullOrBlank()
-                    else -> !it.sourceField.isNullOrBlank() || !it.fixedValue.isNullOrBlank() || !it.defaultValue.isNullOrBlank()
-                }
-            }
+            .filter { MappingStatusResolver.isEffectiveMapping(it) }
             .map { it.targetField }
             .toSet()
 
@@ -220,32 +226,74 @@ class MappingApplicationService(
         }
     }
 
-    private fun toDto(config: MappingConfiguration): MappingConfigurationDto =
-        MappingConfigurationDto(
+    private fun toDto(config: MappingConfiguration): MappingConfigurationDto {
+        val targetSchema = try {
+            kingdeeMcpClient.getFormSchema(config.customerId, config.targetFormId)
+        } catch (_: Exception) {
+            null
+        }
+
+        val raw = config.mappings.map { m ->
+            FieldMappingDto(
+                id = m.id,
+                targetField = m.targetField,
+                targetFieldName = m.targetFieldName,
+                mappingType = m.mappingType,
+                sourceField = m.sourceField,
+                fixedValue = m.fixedValue,
+                defaultValue = m.defaultValue,
+                expression = m.expression,
+                dictionary = m.dictionary?.let { objectMapper.readValue(it) },
+                confidence = m.confidence,
+                aiReason = m.aiReason,
+                confirmed = m.confirmed,
+                targetRequired = m.targetRequired
+            )
+        }
+
+        val merged = if (targetSchema != null) mergeWithSchemaLeaves(raw, targetSchema) else raw
+        val enriched = mappingStatusResolver.enrichAll(merged)
+        return MappingConfigurationDto(
             id = config.id,
             customerId = config.customerId,
             scenarioCode = config.scenarioCode,
             sourceApi = config.sourceApi,
             targetFormId = config.targetFormId,
-            mappings = config.mappings.map { m ->
-                FieldMappingDto(
-                    id = m.id,
-                    targetField = m.targetField,
-                    targetFieldName = m.targetFieldName,
-                    mappingType = m.mappingType,
-                    sourceField = m.sourceField,
-                    fixedValue = m.fixedValue,
-                    defaultValue = m.defaultValue,
-                    expression = m.expression,
-                    dictionary = m.dictionary?.let { objectMapper.readValue(it) },
-                    confidence = m.confidence,
-                    aiReason = m.aiReason,
-                    confirmed = m.confirmed,
-                    targetRequired = m.targetRequired,
-                    needConfirm = !m.confirmed && (m.confidence ?: 0.0) < 0.9
+            mappings = enriched,
+            summary = mappingStatusResolver.summarize(enriched)
+        )
+    }
+
+    /**
+     * Ensure every target schema leaf has a mapping row (for「全部字段」≈ leaf count).
+     */
+    private fun mergeWithSchemaLeaves(
+        mappings: List<FieldMappingDto>,
+        targetSchema: SchemaTree
+    ): List<FieldMappingDto> {
+        val byTarget = mappings.associateBy { it.targetField }.toMutableMap()
+        for (leaf in leafFields(targetSchema)) {
+            if (leaf.path !in byTarget) {
+                byTarget[leaf.path] = FieldMappingDto(
+                    targetField = leaf.path,
+                    targetFieldName = leaf.name,
+                    mappingType = MappingType.IGNORE,
+                    targetRequired = leaf.required,
+                    confidence = null
+                )
+            } else {
+                val existing = byTarget[leaf.path]!!
+                byTarget[leaf.path] = existing.copy(
+                    targetFieldName = existing.targetFieldName ?: leaf.name,
+                    targetRequired = leaf.required
                 )
             }
-        )
+        }
+        return byTarget.values.toList()
+    }
+
+    private fun leafFields(schema: SchemaTree): List<SchemaField> =
+        flatten(schema.fields).filter { it.children.isEmpty() }
 
     private fun flatten(fields: List<SchemaField>): List<SchemaField> {
         val result = mutableListOf<SchemaField>()
