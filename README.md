@@ -75,18 +75,20 @@ npm run dev
 推荐（stdio，由本系统自动拉起）：
 
 ```bash
-# 先确认本机可运行
-uvx kingdee-mcp --check
+# 使用 GitHub 版（含 QueryBusinessInfo 完整元数据；PyPI 版字段很少）
+uvx --from git+https://github.com/WaHaiLong/KingdeeMCP kingdee-mcp --check
 ```
 
 KingdeeMCP 默认 Transport 为 **stdio**（FastMCP `mcp.run()`）。  
 本系统 Real 模式默认通过 MCP Java SDK 的 **STDIO Client** 拉起：
 
 ```text
-uvx kingdee-mcp
+uvx --from git+https://github.com/WaHaiLong/KingdeeMCP kingdee-mcp
 ```
 
-并注入上述 `KINGDEE_*` 环境变量。
+并注入上述 `KINGDEE_*` 环境变量。首次会从 GitHub 拉取，耗时更长。
+
+Windows 注意：JVM 需以 UTF-8 运行（`mvn spring-boot:run` 已通过 `.mvn/jvm.config` 配置），否则 MCP stdio 中文会乱码导致 Schema 拉取失败。
 
 > 若你自行以 SSE/HTTP 方式暴露 MCP Server，可将 `aims.mcp.kingdee.transport` 设为 `sse`，并配置 `url`。
 

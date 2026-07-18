@@ -50,7 +50,10 @@ aims:
       list-forms-tool: kingdee_list_forms
       stdio:
         command: ${AIMS_KINGDEE_MCP_COMMAND:uvx}
+        # Prefer GitHub main (QueryBusinessInfo metadata). PyPI package only returns short field_list.
         args:
+          - --from
+          - git+https://github.com/WaHaiLong/KingdeeMCP
           - kingdee-mcp
         env:
           KINGDEE_SERVER_URL: ${KINGDEE_SERVER_URL:}
